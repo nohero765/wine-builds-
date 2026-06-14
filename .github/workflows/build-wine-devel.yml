@@ -1,0 +1,237 @@
+name: Build wine-devel (DXMT)
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Wine development source version (e.g. 11.11)"
+        required: true
+      dxmt_ref:
+        description: DXMT branch or tag
+        required: false
+        default: main
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Make scripts executable
+        run: chmod +x ./scripts/build-wine-devel.sh
+
+      - name: Install dependencies
+        run: |
+          brew install bison ccache gettext mingw-w64 pkgconfig \
+            freetype gnutls libpcap sdl2 molten-vk \
+            vulkan-loader vulkan-headers cmake ninja \
+            gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad
+
+      - name: Pre-flight checks
+        run: |
+          echo "=== Checking required tools ==="
+          clang --version                          || { echo "ERROR: clang missing";       exit 1; }
+          ccache --version                         || { echo "ERROR: ccache missing";      exit 1; }
+          cmake --version                          || { echo "ERROR: cmake missing";       exit 1; }
+          ninja --version                          || { echo "ERROR: ninja missing";       exit 1; }
+          i686-w64-mingw32-gcc --version           || { echo "ERROR: mingw i686 missing";  exit 1; }
+          x86_64-w64-mingw32-gcc --version         || { echo "ERROR: mingw x86_64 missing"; exit 1; }
+          "$(brew --prefix bison)/bin/bison" --version || { echo "ERROR: bison missing";  exit 1; }
+          pkg-config --exists freetype2            || { echo "ERROR: freetype missing";    exit 1; }
+          pkg-config --exists gnutls               || { echo "ERROR: gnutls missing";      exit 1; }
+          pkg-config --exists sdl2                 || { echo "ERROR: sdl2 missing";        exit 1; }
+          pkg-config --exists gstreamer-1.0 || { echo "ERROR: gstreamer missing"; exit 1; }
+
+          echo "=== Checking Wine source URL ==="
+          MAJOR="$(echo "${{ inputs.version }}" | cut -d. -f1)"
+          curl -fsSI \
+            "https://dl.winehq.org/wine/source/${MAJOR}.x/wine-${{ inputs.version }}.tar.xz" \
+            || { echo "ERROR: wine-${{ inputs.version }} source not found — wrong version?"; exit 1; }
+
+          echo "=== Pre-flight passed ==="
+
+      - uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: winedevel-${{ inputs.version }}-molten
+
+      - name: Build Wine
+        run: ./scripts/build-wine-devel.sh "${{ inputs.version }}"
+
+      - name: Verify Wine artifact
+        run: |
+          ARTIFACT="winedevel-${{ inputs.version }}-osx64.tar.gz"
+          test -f "${ARTIFACT}" || { echo "ERROR: Wine tarball not produced"; exit 1; }
+          ls -lh "${ARTIFACT}"
+
+          WINE_BUILD="${GITHUB_WORKSPACE}/workdir/build-wine"
+          test -d "${WINE_BUILD}" || { echo "ERROR: Wine build dir missing"; exit 1; }
+          test -x "${WINE_BUILD}/tools/widl/widl" \
+            || { echo "ERROR: widl not found — DXMT needs it"; exit 1; }
+          echo "Wine build OK. widl: $(${WINE_BUILD}/tools/widl/widl --version 2>&1 | head -1)"
+
+      - name: Clone DXMT
+        run: |
+          git clone --depth 1 --recurse-submodules \
+            --branch "${{ inputs.dxmt_ref }}" \
+            https://github.com/3Shain/DXMT.git dxmt-src
+
+          test -f dxmt-src/build-win64.txt \
+            || { echo "ERROR: build-win64.txt missing from DXMT repo"; exit 1; }
+          test -f dxmt-src/build-win32.txt \
+            || { echo "ERROR: build-win32.txt missing from DXMT repo"; exit 1; }
+          echo "DXMT cloned: $(git -C dxmt-src log --oneline -1)"
+
+      - name: Install Meson
+        run: |
+          pip3 install meson==1.10.0 --break-system-packages
+          meson --version
+
+      - name: Cache LLVM 15
+        id: cache-llvm
+        uses: actions/cache@v5
+        with:
+          key: llvm-15.0.7-darwin-x86_64
+          path: toolchains/llvm-darwin
+
+      - name: Build LLVM 15 for Darwin
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          echo "Cache miss — building LLVM 15.0.7 from source (~30 min, cached after this)"
+          git clone --depth 1 --branch llvmorg-15.0.7 \
+            https://github.com/llvm/llvm-project.git toolchains/llvm-project
+
+          cmake -B toolchains/llvm-darwin-build \
+            -S toolchains/llvm-project/llvm \
+            -DCMAKE_INSTALL_PREFIX="$(pwd)/toolchains/llvm-darwin" \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DLLVM_HOST_TRIPLE=x86_64-apple-darwin \
+            -DLLVM_ENABLE_ASSERTIONS=On \
+            -DLLVM_ENABLE_ZSTD=Off \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_TARGETS_TO_BUILD="" \
+            -DLLVM_BUILD_TOOLS=Off \
+            -DBUG_REPORT_URL="https://github.com/3Shain/dxmt" \
+            -DPACKAGE_VENDOR="DXMT" \
+            -DLLVM_VERSION_PRINTER_SHOW_HOST_TARGET_INFO=Off \
+            -G Ninja
+
+          cmake --build toolchains/llvm-darwin-build -j"$(sysctl -n hw.ncpu)"
+          cmake --install toolchains/llvm-darwin-build
+
+          # Clean up build artifacts before caching — only cache the install
+          rm -rf toolchains/llvm-project toolchains/llvm-darwin-build
+          echo "LLVM 15 built OK: $(ls toolchains/llvm-darwin/bin/)"
+
+      - name: Verify LLVM
+        run: |
+          LLVM_PATH="$(pwd)/toolchains/llvm-darwin"
+          test -d "${LLVM_PATH}" || { echo "ERROR: LLVM path missing"; exit 1; }
+          ls "${LLVM_PATH}/lib/"*.a 2>/dev/null | head -3 \
+            || { echo "ERROR: LLVM static libs missing"; exit 1; }
+          echo "LLVM OK at: ${LLVM_PATH}"
+
+      - name: Build DXMT (64-bit + winemetal)
+        run: |
+          LLVM_PATH="$(pwd)/toolchains/llvm-darwin"
+          WINE_BUILD="${GITHUB_WORKSPACE}/workdir/build-wine"
+
+          meson setup \
+            --cross-file "${GITHUB_WORKSPACE}/dxmt-src/build-win64.txt" \
+            -Dnative_llvm_path="${LLVM_PATH}" \
+            -Dwine_build_path="${WINE_BUILD}" \
+            -Denable_nvapi=true \
+            dxmt-build \
+            "${GITHUB_WORKSPACE}/dxmt-src" \
+            --buildtype release \
+            --prefix "${GITHUB_WORKSPACE}/dxmt-install" \
+            --strip
+
+          meson compile -C dxmt-build
+          meson install -C dxmt-build
+          echo "DXMT 64-bit OK"
+
+      - name: Build DXMT (32-bit WoW64)
+        run: |
+          WINE_BUILD="${GITHUB_WORKSPACE}/workdir/build-wine"
+
+          meson setup \
+            --cross-file "${GITHUB_WORKSPACE}/dxmt-src/build-win32.txt" \
+            -Dwine_build_path="${WINE_BUILD}" \
+            dxmt-build32 \
+            "${GITHUB_WORKSPACE}/dxmt-src" \
+            --buildtype release \
+            --prefix "${GITHUB_WORKSPACE}/dxmt-install" \
+            --strip
+
+          meson compile -C dxmt-build32
+          meson install -C dxmt-build32
+          echo "DXMT 32-bit OK"
+
+      - name: Verify DXMT output
+        run: |
+          DXMT_INSTALL="${GITHUB_WORKSPACE}/dxmt-install"
+
+          echo "=== DXMT install tree ==="
+          find "${DXMT_INSTALL}" -type f | sort
+
+          WINEMETAL=$(find "${DXMT_INSTALL}" \
+            \( -name "winemetal.so" -o -name "winemetal.dylib" \) 2>/dev/null | head -1)
+          test -n "${WINEMETAL}" \
+            || { echo "ERROR: winemetal.so not found in DXMT output"; exit 1; }
+          echo "winemetal: ${WINEMETAL}"
+
+          DXGI=$(find "${DXMT_INSTALL}" -name "dxgi.dll" 2>/dev/null | head -1)
+          test -n "${DXGI}" \
+            || { echo "ERROR: dxgi.dll not found — 64-bit build may have failed"; exit 1; }
+          echo "dxgi.dll: ${DXGI}"
+          echo "=== Verify OK ==="
+
+      - name: Bundle DXMT into Wine app
+        run: |
+          APPNAME="Wine Devel ${{ inputs.version }}"
+          INJECT_DIR="${GITHUB_WORKSPACE}/dxmt-inject"
+          DXMT_INSTALL="${GITHUB_WORKSPACE}/dxmt-install"
+          ARTIFACT="winedevel-${{ inputs.version }}-osx64.tar.gz"
+
+          mkdir -p "${INJECT_DIR}"
+          tar -xzf "${ARTIFACT}" -C "${INJECT_DIR}"
+
+          WINE_ROOT="${INJECT_DIR}/${APPNAME}.app/Contents/Resources/wine"
+          test -d "${WINE_ROOT}" \
+            || { echo "ERROR: Wine.app not found inside tarball"; exit 1; }
+
+          # winemetal.so → Wine's native bridge load path
+          mkdir -p "${WINE_ROOT}/lib/wine/x86_64-unix"
+          WINEMETAL=$(find "${DXMT_INSTALL}" \
+            \( -name "winemetal.so" -o -name "winemetal.dylib" \) | head -1)
+          cp "${WINEMETAL}" "${WINE_ROOT}/lib/wine/x86_64-unix/winemetal.so"
+          echo "Deployed: winemetal.so"
+
+          # 64-bit Windows DLLs
+          mkdir -p "${WINE_ROOT}/share/dxmt/x86_64"
+          find "${DXMT_INSTALL}" -path "*/x86_64-windows/*.dll" -type f \
+           -exec cp {} "${WINE_ROOT}/share/dxmt/x86_64/" \;
+
+          # 32-bit Windows DLLs (strictly x86, not x86_64)
+          mkdir -p "${WINE_ROOT}/share/dxmt/x86"
+          find "${DXMT_INSTALL}" -path "*/i386-windows/*.dll" -type f \
+           -exec cp {} "${WINE_ROOT}/share/dxmt/x86/" \;
+
+          X64=$(ls "${WINE_ROOT}/share/dxmt/x86_64/" | wc -l | tr -d ' ')
+          X86=$(ls "${WINE_ROOT}/share/dxmt/x86/"    | wc -l | tr -d ' ')
+          test "${X64}" -gt 0 \
+            || { echo "ERROR: No 64-bit DLLs deployed"; exit 1; }
+          echo "Deployed: ${X64} x86_64 DLLs, ${X86} x86 DLLs"
+
+          tar -czf "${ARTIFACT}" \
+           -C "${INJECT_DIR}/${APPNAME}.app/Contents/Resources" wine
+          echo "Bundle complete"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: wine-devel-${{ inputs.version }}
+          name: wine-devel ${{ inputs.version }}
+          files: winedevel-${{ inputs.version }}-osx64.tar.gz
+          fail_on_unmatched_files: true
