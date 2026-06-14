@@ -139,16 +139,20 @@ else
 fi
 
 echo ""
-echo "=== Verify 0006 WineMetalView + d3dmetal.c landed ==="
+echo "=== Verify 0006 WineMetalView + 0017 winemetal stub landed ==="
+# Note: d3dmetal.c is part of CodeWeavers' proprietary CrossOver source and
+# does not exist in vanilla Wine. DXMT (built/injected later in the workflow)
+# is the open-source replacement for that role (dxgi.dll/d3d11.dll +
+# winemetal.so), so we no longer check for d3dmetal.c here.
 METAL_VIEW=$(grep -c "WineMetalView" \
     "${WINE_SRC}/dlls/winemac.drv/cocoa_window.m" 2>/dev/null || echo "0")
-D3DMETAL=$(test -f "${WINE_SRC}/dlls/winemac.drv/d3dmetal.c" && echo "1" || echo "0")
-if [[ "$METAL_VIEW" -gt 0 && "$D3DMETAL" -eq 1 ]]; then
-    echo "  ✓ WineMetalView in cocoa_window.m (${METAL_VIEW} refs) + d3dmetal.c present — patch 0006 landed correctly"
+WINEMETAL_STUB=$(test -d "${WINE_SRC}/dlls/winemetal" && echo "1" || echo "0")
+if [[ "$METAL_VIEW" -gt 0 && "$WINEMETAL_STUB" -eq 1 ]]; then
+    echo "  ✓ WineMetalView in cocoa_window.m (${METAL_VIEW} refs) + dlls/winemetal stub present"
 else
-    echo "  ✗ FATAL: 0006 did not apply correctly."
+    echo "  ✗ FATAL: critical patches did not land correctly."
     echo "    WineMetalView hits in cocoa_window.m: ${METAL_VIEW}"
-    echo "    d3dmetal.c present: ${D3DMETAL}"
+    echo "    dlls/winemetal stub present: ${WINEMETAL_STUB}"
     exit 1
 fi
 endgroup
