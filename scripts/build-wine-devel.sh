@@ -78,6 +78,14 @@ fi
 test -n "${WINE_SRC}" && test -x "${WINE_SRC}/configure"
 echo "WINE_SRC=${WINE_SRC}"
 
+echo "=== Initialize git repo in wine source (git apply -C needs a repo HERE not the parent) ==="
+git -C "${WINE_SRC}" init -q
+git -C "${WINE_SRC}" config user.email "build@local"
+git -C "${WINE_SRC}" config user.name "build"
+git -C "${WINE_SRC}" add -A
+git -C "${WINE_SRC}" commit -q -m "vanilla wine-${VERSION}"
+echo "  ✓ git repo initialized in ${WINE_SRC}"
+
 echo "=== winemetal stub check ==="
 ls "${WINE_SRC}/dlls/" | grep -i winemetal || echo "winemetal NOT found (expected on vanilla Wine - added by patch 0017)"
 endgroup
@@ -134,6 +142,24 @@ echo "=== Diagnostic: did 0005 actually land in process.c? ==="
 grep -n "steamwebhelper\|hack_append_command_line\|CROSSOVER HACK\|no.sandbox" \
     "${WINE_SRC}/dlls/kernelbase/process.c" 2>/dev/null | head -20 \
     || echo "  (nothing matched — 0005 may not have applied functionally)"
+
+echo "=== Force-inject steamwebhelper CEF args if 0005 still missed ==="
+PROCESS_C="${WINE_SRC}/dlls/kernelbase/process.c"
+if [[ -f "${PROCESS_C}" ]]; then
+    if grep -q 'steamwebhelper' "${PROCESS_C}"; then
+        echo "  ✓ steamwebhelper entry confirmed present — no injection needed"
+    elif grep -q 'hack_append_command_line' "${PROCESS_C}"; then
+        # 0004 landed but 0005 didn't — inject steamwebhelper before the NULL sentinel
+        perl -i -pe 's/^(\s+)\{\s*NULL\s*\}/$1{L"steamwebhelper.exe", L" --no-sandbox --in-process-gpu --disable-gpu", NULL, NULL},\n$&/' "${PROCESS_C}"
+        grep -q 'steamwebhelper' "${PROCESS_C}" \
+            && echo "  ✓ steamwebhelper.exe force-injected before NULL sentinel" \
+            || echo "  ⚠ injection regex missed — dump options[] array manually to debug"
+    else
+        echo "  ⚠ FATAL: hack_append_command_line not found — 0004 also missed; git init may not have worked"
+    fi
+else
+    echo "  ⚠ process.c not found at ${PROCESS_C} — check WINE_SRC path"
+fi
 
 echo "=== Applying dwproton backport patches (gi-timeout excluded) ==="
 if [[ -d "${DWPROTON_BASE}" ]]; then
