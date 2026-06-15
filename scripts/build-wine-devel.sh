@@ -161,6 +161,30 @@ else
     echo "  ⚠ process.c not found at ${PROCESS_C} — check WINE_SRC path"
 fi
 
+echo "=== Diagnostic: is_rosetta2 references ==="
+grep -rn "is_rosetta2" "${WINE_SRC}/dlls/ntdll" 2>/dev/null || echo "  (no references found in dlls/ntdll)"
+
+echo "=== Force-define is_rosetta2 if used but undeclared (Rosetta 2 detection) ==="
+SIGNAL_X64_C="${WINE_SRC}/dlls/ntdll/unix/signal_x86_64.c"
+if [[ -f "${SIGNAL_X64_C}" ]] && grep -q 'is_rosetta2' "${SIGNAL_X64_C}"; then
+    if grep -rqE '(BOOL|int|bool)[[:space:]]+is_rosetta2[[:space:]]*[=;]' \
+        "${WINE_SRC}/dlls/ntdll/unix"/*.c "${WINE_SRC}/dlls/ntdll/unix"/*.h 2>/dev/null; then
+        echo "  ✓ is_rosetta2 already declared somewhere — no injection needed"
+    else
+        LAST_INCLUDE_LINE=$(grep -n '^#include' "${SIGNAL_X64_C}" | tail -1 | cut -d: -f1)
+        if [[ -n "${LAST_INCLUDE_LINE}" ]]; then
+            perl -i -pe 'if ($. == '"${LAST_INCLUDE_LINE}"') {
+                $_ .= "\n#include <sys/sysctl.h>\n\nstatic BOOL is_rosetta2;\n\nstatic void __attribute__((constructor)) wine_init_is_rosetta2(void)\n{\n    int ret = 0;\n    size_t size = sizeof(ret);\n    if (sysctlbyname(\"sysctl.proc_translated\", &ret, &size, NULL, 0) != -1)\n        is_rosetta2 = (ret == 1);\n}\n";
+            }' "${SIGNAL_X64_C}"
+            grep -q 'wine_init_is_rosetta2' "${SIGNAL_X64_C}" \
+                && echo "  ✓ is_rosetta2 definition injected after #include block (line ${LAST_INCLUDE_LINE})" \
+                || echo "  ⚠ injection failed — patch signal_x86_64.c manually near line 2645"
+        else
+            echo "  ⚠ could not locate #include lines in signal_x86_64.c — manual fix needed"
+        fi
+    fi
+fi
+
 echo "=== Applying dwproton backport patches (gi-timeout excluded) ==="
 if [[ -d "${DWPROTON_BASE}" ]]; then
     for subdir in "${DWPROTON_BASE}/0001-em-backports" "${DWPROTON_BASE}/0002-misc-dw"; do
