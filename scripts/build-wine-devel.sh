@@ -117,6 +117,29 @@ while IFS= read -r patch; do
     apply_patch "$patch"
 done < <(find "${DEVEL}" -maxdepth 1 -type f \( -name '*.diff' -o -name '*.patch' \) | sort)
 
+echo "=== Force-apply 0006 via patch --fuzz=5 (DXMT requires its Metal C exports) ==="
+# git apply --3way fails for 0006 because it was written against CrossOver source
+# (no shared git history → no base blob for 3-way merge). GNU patch with --fuzz
+# is more permissive about context mismatches and can apply it anyway.
+PATCH_0006="${DEVEL}/0006-winemac-CW-HACK-22435.diff"
+if [[ -f "${PATCH_0006}" ]]; then
+  if git -C "${WINE_SRC}" apply --check --whitespace=nowarn "${PATCH_0006}" 2>/dev/null; then
+    git -C "${WINE_SRC}" apply --whitespace=nowarn "${PATCH_0006}"
+    echo "  ✓ 0006 applied cleanly on retry"
+  else
+    patch -p1 --forward --fuzz=5 --ignore-whitespace \
+      -d "${WINE_SRC}" < "${PATCH_0006}" 2>&1 | tail -8 || true
+    METAL_AFTER=$(grep -c "WineMetalView" "${WINE_SRC}/dlls/winemac.drv/cocoa_window.m" 2>/dev/null || echo "0")
+    if [[ "${METAL_AFTER}" -gt 0 ]]; then
+      echo "  ✓ 0006 force-applied — WineMetalView refs in cocoa_window.m: ${METAL_AFTER}"
+    else
+      echo "  ✗ WARNING: 0006 still could not apply — DXMT Metal view will fail at runtime"
+    fi
+  fi
+else
+  echo "  ⚠ 0006 patch file not found at ${PATCH_0006}"
+fi
+
 echo "=== Manual fix for 1001-kernelbase-CW-HACK-19610 (corrupt upstream patch) ==="
 # 1001-kernelbase-CW-HACK-19610.diff has a malformed hunk in riverfog7's repo
 # (its second hunk header claims 7 lines but only 6 are present), so
@@ -503,6 +526,23 @@ for dylib in "${WINE_LIB}"/*.dylib; do
   [[ -f "$dylib" ]] || continue
   codesign --remove-signature "$dylib" 2>/dev/null || true
 done
+
+echo "=== Rewrite Homebrew paths in newly bundled dylibs (2nd pass) ==="
+# CRASH FIX: libgio, libgstrtp, libgstriff, libgstfft, etc. were added to
+# ${WINE_LIB}/ by the "scan all plugin deps" step — AFTER the first rewrite
+# pass already ran. Their internal Cellar paths (e.g. libgio→libglib at
+# /usr/local/Cellar/glib/2.88.1/...) were never fixed. At runtime, loading
+# libgstpbutils triggers libgio which tries the missing Cellar path → crash.
+for dylib in "${WINE_LIB}"/*.dylib; do
+  [[ -f "$dylib" ]] || continue
+  while IFS= read -r dep; do
+    [[ "$dep" =~ ^(/usr/local/|/opt/homebrew/) ]] || continue
+    depname=$(basename "$dep")
+    [[ -f "${WINE_LIB}/${depname}" ]] || continue
+    install_name_tool -change "$dep" "@loader_path/${depname}" "$dylib" 2>/dev/null
+  done < <(otool -L "$dylib" 2>/dev/null | awk 'NR>1{print $1}')
+done
+echo "  ✓ 2nd pass complete"
 
 echo "=== Rewrite Homebrew paths in GStreamer plugins ==="
 find "${WINE_LIB}/gstreamer-1.0" -name "*.dylib" | while read -r plugin; do
