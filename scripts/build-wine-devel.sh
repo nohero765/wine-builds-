@@ -540,6 +540,15 @@ echo "  → scanning all plugin dependencies (this bundles libgio, libgstnet, li
 find "${WINE_LIB}/gstreamer-1.0" -name "*.dylib" | while read -r plugin; do
   while IFS= read -r dep; do
     [[ "$dep" =~ ^(/usr/local/|/opt/homebrew/) ]] || continue
+    depname=$(basename "$dep")
+    # Skip libs that initialize subsystems incompatible with Wine:
+    # GTK/GDK conflict with Wine's own NSApplication; X11 has no server;
+    # EGL/GL conflict with Wine's Metal rendering; JACK/Pulse have no servers.
+    case "$depname" in
+      libgtk*|libgdk*|libX[^ML]*|libjack*|libpulse*|libEGL*|libGL.*|libepoxy*)
+        echo "  (skip incompatible: $depname)"
+        continue ;;
+    esac
     bundle_dep "$dep"
   done < <(otool -L "$plugin" 2>/dev/null | awk 'NR>1{print $1}')
 done
