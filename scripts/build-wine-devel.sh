@@ -165,30 +165,23 @@ else
   echo "  ✓ d3dmetal_client_surface already present or unused — skipping"
 fi
 
-echo "=== Fix: resize DXMT CAMetalLayer sublayer on WineContentView setFrameSize: ==="
+echo "=== Fix: resize DXMT Metal view on WineContentView setFrameSize: ==="
 COCOA_WIN="${WINE_SRC}/dlls/winemac.drv/cocoa_window.m"
-# DXMT attaches its Metal surface as a CAMetalLayer sublayer of WineContentView's
-# backing layer, not as an NSView subview. That sublayer is sized to the initial
-# window size (130x1) and never updated, so only 130x1 of the rendered image
-# is visible in the top-left corner even though the D3D backbuffer is 1470x956.
-# Fix: hook setFrameSize: (the method Wine actually calls when the window resizes)
-# and resize any CAMetalLayer sublayer directly via [layer setFrame:] — NOT via
-# [view setFrame:] which triggers DXMT callbacks and causes the black screen.
 perl -i -0pe '
   s{(\@implementation WineContentView\b)(.*?)(\@end)}{
     my ($cls, $body, $end) = ($1, $2, $3);
-    my $hook = "- (void)setFrameSize:(NSSize)sz\n{\n    [super setFrameSize:sz];\n    if (![self layer]) return;\n    CGRect lb = [[self layer] bounds];\n    for (CALayer *sl in [[self layer] sublayers])\n        if ([sl isKindOfClass:NSClassFromString(\@\"CAMetalLayer\")])\n            [sl setFrame:lb];\n    NSRect vb = [self bounds];\n    for (NSView *sv in [self subviews])\n        if ([[sv layer] isKindOfClass:NSClassFromString(\@\"CAMetalLayer\")])\n            [[sv layer] setFrame:lb];\n}\n\n";
+    my $hook = "- (void)setFrameSize:(NSSize)sz\n{\n    [super setFrameSize:sz];\n    NSRect vb = NSMakeRect(0, 0, sz.width, sz.height);\n    CGRect lb = CGRectMake(0, 0, sz.width, sz.height);\n    /* sublayer case: DXMT CAMetalLayer added as sublayer of backing layer */\n    for (CALayer *sl in [[self layer] sublayers])\n        if ([sl isKindOfClass:NSClassFromString(\@\"CAMetalLayer\")])\n            [sl setFrame:lb];\n    /* subview case: DXMT added a CAMetalLayer-backed NSView as subview */\n    for (NSView *sv in [self subviews])\n        if ([[sv layer] isKindOfClass:NSClassFromString(\@\"CAMetalLayer\")])\n            if (!NSEqualRects([sv frame], vb))\n                [sv setFrame:vb];\n}\n\n";
     if ($body !~ /- \(void\)setFrameSize:\(NSSize\)/) {
       $cls . $hook . $body . $end;
     } else {
-      my $metal = "    if ([self layer]) { CGRect lb = [[self layer] bounds]; for (CALayer *sl in [[self layer] sublayers]) if ([sl isKindOfClass:NSClassFromString(\@\"CAMetalLayer\")]) [sl setFrame:lb]; }\n";
+      my $metal = "    { NSRect __vb = NSMakeRect(0,0,[self bounds].size.width,[self bounds].size.height); CGRect __lb = CGRectMake(0,0,__vb.size.width,__vb.size.height); for (CALayer *__sl in [[self layer] sublayers]) if ([__sl isKindOfClass:NSClassFromString(\@\"CAMetalLayer\")]) [__sl setFrame:__lb]; for (NSView *__sv in [self subviews]) if ([[__sv layer] isKindOfClass:NSClassFromString(\@\"CAMetalLayer\")] && !NSEqualRects([__sv frame],__vb)) [__sv setFrame:__vb]; }\n";
       $body =~ s{(\[super setFrameSize:[^\]]+\];)}{$1\n$metal};
       $cls . $body . $end;
     }
   }se
 ' "${COCOA_WIN}"
-grep -q 'CAMetalLayer.*setFrame\|setFrame.*lb' "${COCOA_WIN}" \
-  && echo "  ✓ CAMetalLayer sublayer resize injected into setFrameSize:" \
+grep -q 'NSEqualRects\|CAMetalLayer.*setFrame\|setFrame.*vb' "${COCOA_WIN}" \
+  && echo "  ✓ Metal resize injected (no early return, handles both sublayer and subview)" \
   || echo "  ✗ FATAL: injection failed"
 
 echo "=== Manual fix for 1001-kernelbase-CW-HACK-19610 (corrupt upstream patch) ==="
