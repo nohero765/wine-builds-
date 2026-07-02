@@ -5,7 +5,7 @@ set -euo pipefail
 # build-wine-devel.sh
 #
 # Builds Wine *development* sources (e.g. wine-11.11) from WineHQ, then
-# applies the riverfog7/macports-wine "wine-devel" patch set (the same set
+# applies the macports-wine "wine-devel" patch set (the same set
 # previously applied on top of CrossOver sources in build-wine.sh).
 #
 # Patch policy (per request):
