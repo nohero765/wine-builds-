@@ -6,4 +6,4 @@ the wine that will be used for the TruckersMP launcher.
 
 > [!NOTE] 
 >Known issues as of 2/7/26
->Controller not working due to winebus crashing due to a problem with SDL2 dylib 
+>Controller Input not working due to winebus crashing caused by an issue with SDL2 dylib 
