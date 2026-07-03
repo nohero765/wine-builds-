@@ -27,6 +27,7 @@ jobs:
             freetype gnutls libpcap sdl2 molten-vk \
             vulkan-loader vulkan-headers cmake ninja \
             gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad
+          brew upgrade sdl2 || brew install sdl2   
 
       - name: Pre-flight checks
         run: |
