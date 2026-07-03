@@ -351,7 +351,7 @@ pushd "${BUILDDIR}" >/dev/null
     --with-opencl \
     --with-pcap \
     --with-pthread \
-    --with-sdl \
+    --without-sdl \
     --with-unwind \
     --with-vulkan \
     --without-alsa \
