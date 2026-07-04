@@ -3,7 +3,8 @@ set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # build-wine-devel.sh
-#
+# TruckersMP macOS Compatibility Layer
+# GitHub: https://github.com/nohero765/truckersmp-macos
 # Builds Wine *development* sources (e.g. wine-11.11) from WineHQ, then
 # applies the macports-wine "wine-devel" patch set (the same set
 # previously applied on top of CrossOver sources in build-wine.sh).
