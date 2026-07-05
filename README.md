@@ -2,8 +2,7 @@
 the wine that will be used for the TruckersMP launcher.
 
 > [!NOTE]
-> Still being worked on. A lot of things will be changed.
-
+> Still being worked on. A lot of things will be changed.       
 > Uses Steam compatibility patches adapted from CodeWeavers' CrossOver Wine source.
 
 > [!WARNING] 
