@@ -1,0 +1,20 @@
+This project is derived from and includes code from:
+
+Wine
+Copyright (C) 1993-2026 the Wine project authors (see the
+Wine project's AUTHORS file)
+https://www.winehq.org
+
+CrossOver (CodeWeavers, Inc.)
+Steam compatibility patches adapted from CodeWeavers' CrossOver
+source release (crossover-sources), licensed under LGPL-2.1+
+https://www.codeweavers.com
+
+DXMT
+Copyright (c) 2023 Feifan He
+https://github.com/3Shain/dxmt
+Licensed under the MIT License (DXMT 0.80)
+
+Original build scripts, GitHub Actions workflows, and packaging
+in this repository:
+Copyright (c) 2026 nohero765
