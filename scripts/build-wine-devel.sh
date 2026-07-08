@@ -8,6 +8,7 @@ set -euo pipefail
 # Builds Wine *development* sources (e.g. wine-11.11) from WineHQ, then
 # applies the macports-wine "wine-devel" patch set (the same set
 # previously applied on top of CrossOver sources in build-wine.sh).
+# these patches are from codeweavrs crossover yet they still come from a fork of macports this will be changed in the future!!
 #
 # Patch policy (per request):
 #   - emulators/wine-devel/files/*.diff, *.patch   -> ALL applied, in order
@@ -16,14 +17,9 @@ set -euo pipefail
 #   - emulators/wine-devel/files/dwproton/0001-em-backports/*  -> applied
 #   - emulators/wine-devel/files/dwproton/0002-misc-dw/*       -> applied
 #   - emulators/wine-devel/files/dwproton/gi-timeout/*         -> SKIPPED
-#       (these are the "curl timeout fix patches for certain games" -
-#        excluded per request as "timeout patches for games")
 #   - emulators/wine-devel/files/mf/*                          -> applied
 #       (mfreadwrite video-processor fix for some games - NOT a timeout
-#        patch, so included by default. Flip APPLY_MF=0 below to skip it.)
-#
-# Usage: ./build-wine-devel.sh <wine-version>
-#   e.g. ./build-wine-devel.sh 11.11
+#        patch, so included by default. Flip APPLY_MF=0 below to skip it.
 # ---------------------------------------------------------------------------
 
 APPLY_MF=1   # set to 0 to skip emulators/wine-devel/files/mf/* patches
