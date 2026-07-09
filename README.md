@@ -6,7 +6,7 @@ the wine that will be used for the TruckersMP launcher.
 
 > [!WARNING] 
 >Known issues as of 9/7/2026                                                                
->Telemetry server fails to run under this wine due to wine mono version having bug with networking the telemetry server uses upgrading or downgrading wine monon will fix it              
+>Telemetry server fails to run under this wine due to wine mono version having bug with networking the telemetry server uses upgrading or downgrading wine mono will fix it              
 >Alot of GStreamer warnings in the log may impact the initial startup of Steam for the first time.
 
 ## Credits
